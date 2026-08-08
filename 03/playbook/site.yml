@@ -1,0 +1,176 @@
+---
+- name: Install Clickhouse
+  hosts: clickhouse
+  handlers:
+    - name: Start clickhouse service
+      become: true
+      ansible.builtin.systemd:
+        name: clickhouse-server
+        state: restarted
+  tasks:
+    - name: Get clickhouse distrib
+      become: true
+      ansible.builtin.get_url:
+        url: "https://packages.clickhouse.com/rpm/stable/{{ item.name }}-{{ clickhouse_version }}.{{ item.arch }}.rpm"
+        dest: "/tmp/{{ item.name }}-{{ clickhouse_version }}.rpm"
+        mode: '0644'
+      loop:
+        - { name: 'clickhouse-common-static', arch: 'x86_64' }
+        - { name: 'clickhouse-client', arch: 'noarch' }
+        - { name: 'clickhouse-server', arch: 'noarch' }
+    - name: Install clickhouse packages
+      become: true
+      ansible.builtin.dnf:
+        disable_gpg_check: true
+        name:
+          - "/tmp/clickhouse-common-static-{{ clickhouse_version }}.rpm"
+          - "/tmp/clickhouse-client-{{ clickhouse_version }}.rpm"
+          - "/tmp/clickhouse-server-{{ clickhouse_version }}.rpm"
+      notify: Start clickhouse service
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+    - name: Create database
+      ansible.builtin.command: "clickhouse-client -q 'create database logs;'"
+      register: create_db
+      failed_when: create_db.rc != 0 and create_db.rc !=82
+      changed_when: create_db.rc == 0
+
+- name: Установка Vector
+  hosts: vector
+  handlers:
+    - name: Reload Vector
+      ansible.builtin.systemd:
+        name: vector
+        state: restarted
+      become: true
+  tasks:
+    - name: Скачивание Vector
+      ansible.builtin.get_url:
+        url: "https://packages.timber.io/vector/{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-musl.tar.gz"
+        dest: "/tmp/vector-{{ vector_version }}.tar.gz"
+        mode: '0644'
+
+    - name: Создание директории для распаковки Vector
+      ansible.builtin.file:
+        path: "/tmp/vector-{{ vector_version }}"
+        state: directory
+        mode: '0755'
+
+    - name: Распаковка Vector
+      ansible.builtin.unarchive:
+        remote_src: true
+        src: "/tmp/vector-{{ vector_version }}.tar.gz"
+        dest: "/tmp/vector-{{ vector_version }}"
+
+    - name: Копирование бинарника
+      ansible.builtin.copy:
+        src: "/tmp/vector-{{ vector_version }}/vector-x86_64-unknown-linux-musl/bin/vector"
+        dest: "/usr/local/bin/vector"
+        remote_src: true
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Создание папки с конфигом
+      ansible.builtin.file:
+        path: /etc/vector
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Создать директорию для данных Vector
+      ansible.builtin.file:
+        path: /var/lib/vector/
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Копирование конфига Vector из Jinja2 шаблона
+      ansible.builtin.template:
+        src: templates/vector.yaml.j2
+        dest: /etc/vector/vector.yaml
+        mode: '0644'
+        owner: root
+        group: root
+      become: true
+      notify: Reload Vector
+
+    - name: Копирование systemd unit-файл для Vector
+      ansible.builtin.template:
+        src: templates/vector.service.j2
+        dest: /etc/systemd/system/vector.service
+        mode: '0644'
+        owner: root
+        group: root
+      become: true
+      notify: Reload Vector
+
+    - name: Активировать и запустить сервис Vector
+      ansible.builtin.systemd:
+        name: vector
+        enabled: true
+        state: started
+        daemon_reload: true
+      become: true
+
+- name: Установка LightHouse
+  hosts: lighthouse
+  handlers:
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+  become: true
+  tasks:
+    - name: Обновление кэша пакетов APT
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Установка Nginx и утилиты Unzip
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - unzip
+        state: present
+
+    - name: Скачивание и распаковка архива со статикой lighthouse
+      ansible.builtin.unarchive:
+        src: "{{ lighthouse_archive_url }}"
+        dest: "/var/www"
+        remote_src: yes
+        owner: www-data
+        group: www-data
+
+    - name: Создание конфига Nginx из шаблона Jinja2
+      ansible.builtin.template:
+        src: lighthouse.conf.j2
+        dest: /etc/nginx/sites-available/lighthouse.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Nginx
+
+    - name: Включение конфига
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/lighthouse.conf
+        dest: /etc/nginx/sites-enabled/lighthouse.conf
+        state: link
+      notify: Reload Nginx
+
+    - name: Отключение дефолтного конфига Nginx
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload Nginx
+
+    - name: Активация и запуск службы Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: yes
