@@ -1,5 +1,7 @@
 ## Описание Ansible проекта:
 
+[Ссылка на коммит](https://github.com/mynkyshonok/SHKONF-homeworks/commit/00c7c013fb0c4307d9e0fcc4f77b2e12f5890db3)
+
 Проект имеет: 
  - файл плейбука site.yml
  - Inventory файл с двумя группами хостов Clickhouse и Vector
