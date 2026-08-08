@@ -1,0 +1,119 @@
+---
+- name: Install Clickhouse
+  hosts: clickhouse
+  handlers:
+    - name: Start clickhouse service
+      become: true
+      ansible.builtin.systemd:
+        name: clickhouse-server
+        state: restarted
+  tasks:
+    - name: Get clickhouse distrib
+      become: true
+      ansible.builtin.get_url:
+        url: "https://packages.clickhouse.com/rpm/stable/{{ item.name }}-{{ clickhouse_version }}.{{ item.arch }}.rpm"
+        dest: "/tmp/{{ item.name }}-{{ clickhouse_version }}.rpm"
+        mode: '0644'
+      loop:
+        - { name: 'clickhouse-common-static', arch: 'x86_64' }
+        - { name: 'clickhouse-client', arch: 'noarch' }
+        - { name: 'clickhouse-server', arch: 'noarch' }
+    - name: Install clickhouse packages
+      become: true
+      ansible.builtin.dnf:
+        disable_gpg_check: true
+        name:
+          - "/tmp/clickhouse-common-static-{{ clickhouse_version }}.rpm"
+          - "/tmp/clickhouse-client-{{ clickhouse_version }}.rpm"
+          - "/tmp/clickhouse-server-{{ clickhouse_version }}.rpm"
+      notify: Start clickhouse service
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+    - name: Create database
+      ansible.builtin.command: "clickhouse-client -q 'create database logs;'"
+      register: create_db
+      failed_when: create_db.rc != 0 and create_db.rc !=82
+      changed_when: create_db.rc == 0
+
+- name: Установка Vector
+  hosts: vector
+  handlers:
+    - name: Перезапустить Vector
+      ansible.builtin.systemd:
+        name: vector
+        state: restarted
+      become: true
+  tasks:
+    - name: Скачивание Vector
+      ansible.builtin.get_url:
+        url: "https://packages.timber.io/vector/{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-musl.tar.gz"
+        dest: "/tmp/vector-{{ vector_version }}.tar.gz"
+        mode: '0644'
+
+    - name: Создание директории для распаковки Vector
+      ansible.builtin.file:
+        path: "/tmp/vector-{{ vector_version }}"
+        state: directory
+        mode: '0755'
+
+    - name: Распаковка Vector
+      ansible.builtin.unarchive:
+        remote_src: true
+        src: "/tmp/vector-{{ vector_version }}.tar.gz"
+        dest: "/tmp/vector-{{ vector_version }}"
+
+    - name: Копирование бинарника
+      ansible.builtin.copy:
+        src: "/tmp/vector-{{ vector_version }}/vector-x86_64-unknown-linux-musl/bin/vector"
+        dest: "/usr/local/bin/vector"
+        remote_src: true
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Создание папки с конфигом
+      ansible.builtin.file:
+        path: /etc/vector
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Создать директорию для данных Vector
+      ansible.builtin.file:
+        path: /var/lib/vector/
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      become: true
+
+    - name: Копирование конфига Vector из Jinja2 шаблона
+      ansible.builtin.template:
+        src: templates/vector.yaml.j2
+        dest: /etc/vector/vector.yaml
+        mode: '0644'
+        owner: root
+        group: root
+      become: true
+      notify: Перезапустить Vector
+
+    - name: Копирование systemd unit-файл для Vector
+      ansible.builtin.template:
+        src: templates/vector.service.j2
+        dest: /etc/systemd/system/vector.service
+        mode: '0644'
+        owner: root
+        group: root
+      become: true
+      notify: Перезапустить Vector
+
+    - name: Активировать и запустить сервис Vector
+      ansible.builtin.systemd:
+        name: vector
+        enabled: true
+        state: started
+        daemon_reload: true
+      become: true

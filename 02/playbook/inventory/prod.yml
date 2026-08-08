@@ -1,0 +1,11 @@
+---
+clickhouse:
+  hosts:
+    clickhouse-01:
+      ansible_host: 111.88.152.39
+      ansible_user: tymka
+vector:
+  hosts:
+    vector-01:
+      ansible_host: 111.88.155.46
+      ansible_user: tymka
