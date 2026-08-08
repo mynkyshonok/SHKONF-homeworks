@@ -11,13 +11,19 @@
  - папка template с шаблонами jinja2
 
 Переменные:
-Для clickhouse:
-   - "clickhouse_version" - версия clickhouse
-Для vector:
-   - "vector_version" - версия vector
-Для lighthouse:
-   - "lighthouse_archive_url" - url архива
-   - "lighthouse_root_dir" - путь до папки со статикой
+
+  Для clickhouse:
+  
+     - "clickhouse_version" - версия clickhouse
+
+  Для vector:
+  
+     - "vector_version" - версия vector
+
+  Для lighthouse:
+  
+     - "lighthouse_archive_url" - url архива
+     - "lighthouse_root_dir" - путь до папки со статикой
 
 Плейбук состоит из трёх плеев Install Clickhouse, Установка Vector, Установка LightHouse:
  - Install Clickhouse:
